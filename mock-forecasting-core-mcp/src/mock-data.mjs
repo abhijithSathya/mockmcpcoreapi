@@ -146,7 +146,7 @@ export function createSeedData() {
         capacityCategory: category,
         capacityCategoryName: categoryName(category),
         requiredWorkSkills: SKILLS_BY_CATEGORY[category].slice(0, 2),
-        timeOfBooking: `${addDays(BASE_DATE, -(dayOffset + 4))} 09:00:00`,
+        timeOfBooking: `${addDays(date, -bookingLeadDays(cluster.area, dayOffset, index))} 09:00:00`,
         startTime: `${date} ${String(8 + (index % 8)).padStart(2, "0")}:00:00`,
         endTime: `${date} ${String(10 + (index % 8)).padStart(2, "0")}:00:00`,
         slaWindowStart: `${date} 08:00:00`,
@@ -193,6 +193,15 @@ function activityTypeFor(category, index) {
 function durationFor(category, index) {
   const base = { CC_APPLIANCE: 95, CC_HVAC: 125, CC_PLUMBING: 110 }[category] || 90;
   return base + ((index % 4) * 15);
+}
+
+function bookingLeadDays(area, dayOffset, index) {
+  const recent = dayOffset <= 13;
+  const wave = index % 3;
+  if (area === "FL") return recent ? 6 + wave : 2 + wave;
+  if (area === "TX") return recent ? 5 + (wave % 2) : 3 + (wave % 2);
+  if (area === "GA") return recent ? 4 + (wave % 2) : 3;
+  return recent ? 4 : 3;
 }
 
 function areaName(area) {
