@@ -1,0 +1,12 @@
+{
+  "name": "forecasting-core-entity-mock-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mock MCP server exposing granular Oracle Field Service activity, resource, and resource-location data for Forecasting 2.0 workflow calculations.",
+  "scripts": {
+    "dev": "node src/render-server.mjs",
+    "start": "node src/render-server.mjs",
+    "test": "node --test"
+  }
+}
