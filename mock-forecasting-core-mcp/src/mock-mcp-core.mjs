@@ -30,10 +30,11 @@ export function getPublicState() {
     generatedAt: BASE_NOW,
     dataset: {
       activities: state.activities.length,
-      resources: state.resources.length,
+      resources: Object.values(state.resourcesByArea).flat().length,
       resourceLocations: Object.values(state.locationsByResourceId).flat().length,
-      capacityAreas: [...new Set(state.resources.map((resource) => resource.capacityArea))].sort(),
-      capacityCategories: [...new Set(state.resources.map((resource) => resource.capacityCategory))].sort()
+      capacityAreas: state.capacityAreas.filter((area) => area.type === "area").map((area) => area.label).sort(),
+      resourceTypes: state.resourceTypes.length,
+      activityWorkSkills: Object.keys(state.activityWorkSkillsByActivityId).length
     },
     toolCount: Object.keys(TOOL_METADATA).length,
     tools: Object.keys(TOOL_METADATA)
@@ -84,9 +85,12 @@ export async function handleHttpRequest(request, env = {}) {
           "POST /messages?sessionId=...",
           "GET /mock/state",
           "POST /mock/reset",
+          "GET /rest/ofscMetadata/v1/capacityAreas",
+          "GET /rest/ofscMetadata/v1/resourceTypes",
           "GET /rest/ofscCore/v1/activities",
-          "GET /rest/ofscCore/v1/resources",
-          "GET /rest/ofscCore/v1/resources/{resourceId}/locations"
+          "GET /rest/ofscCore/v1/resources/{resourceId}/descendants",
+          "GET /rest/ofscCore/v1/resources/{resourceId}/locations",
+          "GET /rest/ofscCore/v1/activities/{activityId}/workSkills"
         ]
       });
     }
@@ -96,17 +100,40 @@ export async function handleHttpRequest(request, env = {}) {
     if (request.method === "GET" && url.pathname === "/mock/mcp-events") return responseJson({ events: mcpEvents.slice(-100) });
     if (request.method === "POST" && url.pathname === "/mock/reset") return responseJson({ reset: true, state: resetState() });
 
+    if (request.method === "GET" && url.pathname === "/rest/ofscMetadata/v1/capacityAreas") {
+      return responseJson(getCapacityAreas(Object.fromEntries(url.searchParams)));
+    }
+
+    if (request.method === "GET" && url.pathname === "/rest/ofscMetadata/v1/resourceTypes") {
+      return responseJson(getResourceTypes(Object.fromEntries(url.searchParams)));
+    }
+
     if (request.method === "GET" && url.pathname === "/rest/ofscCore/v1/activities") {
       return responseJson(getActivities(Object.fromEntries(url.searchParams)));
     }
 
-    if (request.method === "GET" && url.pathname === "/rest/ofscCore/v1/resources") {
-      return responseJson(getResources(Object.fromEntries(url.searchParams)));
+    const descendantsMatch = url.pathname.match(/^\/rest\/ofscCore\/v1\/resources\/([^/]+)\/descendants$/);
+    if (request.method === "GET" && descendantsMatch) {
+      return responseJson(getResourceDescendants({
+        ...Object.fromEntries(url.searchParams),
+        resourceId: decodeURIComponent(descendantsMatch[1])
+      }));
     }
 
     const locationMatch = url.pathname.match(/^\/rest\/ofscCore\/v1\/resources\/([^/]+)\/locations$/);
     if (request.method === "GET" && locationMatch) {
-      return responseJson(getResourceLocations({ resourceId: decodeURIComponent(locationMatch[1]) }));
+      return responseJson(getResourceLocations({
+        ...Object.fromEntries(url.searchParams),
+        resourceId: decodeURIComponent(locationMatch[1])
+      }));
+    }
+
+    const activityWorkSkillsMatch = url.pathname.match(/^\/rest\/ofscCore\/v1\/activities\/([^/]+)\/workSkills$/);
+    if (request.method === "GET" && activityWorkSkillsMatch) {
+      return responseJson(getActivityWorkSkills({
+        ...Object.fromEntries(url.searchParams),
+        activityId: decodeURIComponent(activityWorkSkillsMatch[1])
+      }));
     }
 
     if (request.method === "GET" && url.pathname === "/mcp") {
@@ -214,6 +241,43 @@ export async function callTool(name, args = {}) {
 }
 
 const TOOL_METADATA = {
+  get_capacity_areas: {
+    description: "Return capacity areas modeled after GET /rest/ofscMetadata/v1/capacityAreas.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fields: arrayOrString("Comma-separated or array field names to return."),
+        expand: { type: "string", description: "Supports parent." },
+        status: { type: "string", description: "active or inactive." },
+        type: { type: "string", description: "area or group." }
+      }
+    }
+  },
+  get_resource_types: {
+    description: "Return resource types modeled after GET /rest/ofscMetadata/v1/resourceTypes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer" },
+        offset: { type: "integer" },
+        language: { type: "string" }
+      }
+    }
+  },
+  get_resource_descendants: {
+    description: "Return descendants of a capacity-area resource modeled after GET /rest/ofscCore/v1/resources/{resourceId}/descendants.",
+    inputSchema: {
+      type: "object",
+      required: ["resourceId"],
+      properties: {
+        resourceId: { type: "string", description: "Capacity area label/resource id." },
+        fields: arrayOrString("Comma-separated or array field names to return."),
+        expand: arrayOrString("Supports workSkills and workSchedules."),
+        limit: { type: "integer" },
+        offset: { type: "integer" }
+      }
+    }
+  },
   get_activities: {
     description: "Return granular activity records modeled after GET /rest/ofscCore/v1/activities. No forecasting metrics or recommendations are computed.",
     inputSchema: {
@@ -225,27 +289,7 @@ const TOOL_METADATA = {
         q: { type: "string", description: "Small mock subset of OFSC q syntax, supporting equality and simple IN filters." },
         fields: arrayOrString("Comma-separated or array field names to return."),
         limit: { type: "integer", description: "Maximum activities to return." },
-        offset: { type: "integer", description: "Zero-based offset." },
-        statuses: arrayOrString("Optional status filter for workflow convenience."),
-        capacityAreas: arrayOrString("Optional capacity area filter for workflow convenience."),
-        capacityCategories: arrayOrString("Optional capacity category filter for workflow convenience.")
-      }
-    }
-  },
-  get_resources: {
-    description: "Return granular resource records modeled after GET /rest/ofscCore/v1/resources. No utilization or capacity scoring is computed.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        fields: arrayOrString("Comma-separated or array field names to return."),
-        limit: { type: "integer" },
-        offset: { type: "integer" },
-        statuses: arrayOrString("Resource statuses such as active or inactive."),
-        resourceTypes: arrayOrString("Resource types such as field_resource."),
-        parentResourceId: { type: "string" },
-        capacityAreas: arrayOrString("Optional capacity area filter for workflow convenience."),
-        capacityCategories: arrayOrString("Optional capacity category filter for workflow convenience."),
-        skillCodes: arrayOrString("Optional work skill filter for workflow convenience.")
+        offset: { type: "integer", description: "Zero-based offset." }
       }
     }
   },
@@ -259,13 +303,30 @@ const TOOL_METADATA = {
         fields: arrayOrString("Comma-separated or array field names to return.")
       }
     }
+  },
+  get_activity_work_skills: {
+    description: "Return activity work skills modeled after GET /rest/ofscCore/v1/activities/{activityId}/workSkills.",
+    inputSchema: {
+      type: "object",
+      required: ["activityId"],
+      properties: {
+        activityId: { type: "string", description: "Activity identifier." },
+        limit: { type: "integer" },
+        offset: { type: "integer" }
+      }
+    }
   }
 };
 
 const TOOL_HANDLERS = {
+  get_capacity_areas: getCapacityAreas,
+  get_resource_types: getResourceTypes,
+  get_resource_descendants: getResourceDescendants,
+  get_resource_decendants: getResourceDescendants,
   get_activities: getActivities,
-  get_resources: getResources,
-  get_resource_locations: getResourceLocations
+  get_resource_locations: getResourceLocations,
+  get_activity_work_skills: getActivityWorkSkills,
+  get_activity_workSkill: getActivityWorkSkills
 };
 
 function listTools() {
@@ -276,6 +337,54 @@ function listTools() {
   }));
 }
 
+function getCapacityAreas(args = {}) {
+  const fields = normalizeList(args.fields);
+  let items = state.capacityAreas.slice();
+  if (args.status) items = items.filter((item) => item.status.toLowerCase() === String(args.status).toLowerCase());
+  if (args.type) items = items.filter((item) => item.type.toLowerCase() === String(args.type).toLowerCase());
+  if (args.expand !== "parent") items = items.map(({ parent, ...item }) => item);
+  return { items: items.map((item) => projectFields(item, fields)) };
+}
+
+function getResourceTypes(args = {}) {
+  const offset = clampInteger(args.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  const limit = clampInteger(args.limit, 100, 1, 100);
+  const items = state.resourceTypes.slice();
+  const paged = items.slice(offset, offset + limit);
+  return {
+    items: paged,
+    offset,
+    limit,
+    hasMore: offset + paged.length < items.length,
+    totalResults: items.length
+  };
+}
+
+function getResourceDescendants(args = {}) {
+  if (!args.resourceId) throw new ToolError("missing_resource_id", "resourceId is required.");
+  const offset = clampInteger(args.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  const limit = clampInteger(args.limit, 100, 1, 100);
+  const fields = normalizeList(args.fields);
+  const expand = normalizeList(args.expand);
+  const resources = state.resourcesByArea[args.resourceId];
+  if (!resources) {
+    throw new ToolError("resource_not_found", `No mock capacity area resource exists for resourceId ${args.resourceId}.`);
+  }
+  const items = resources.map((resource) => {
+    const copy = {};
+    const requested = fields.length ? fields : Object.keys(resource).filter((field) => !["workSkills", "workSchedules"].includes(field));
+    for (const field of requested) {
+      if (Object.hasOwn(resource, field) && !["workSkills", "workSchedules"].includes(field)) copy[field] = resource[field];
+    }
+    for (const entity of ["workSkills", "workSchedules"]) {
+      if (expand.includes(entity)) copy[entity] = structuredClone(resource[entity] || { items: [] });
+    }
+    return copy;
+  });
+  const paged = items.slice(offset, offset + limit);
+  return { items: paged, offset, limit, totalResults: items.length, hasMore: offset + paged.length < items.length };
+}
+
 function getActivities(args = {}) {
   const offset = clampInteger(args.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const limit = clampInteger(args.limit, 100, 1, 100000);
@@ -284,12 +393,6 @@ function getActivities(args = {}) {
 
   const resources = normalizeList(args.resources);
   if (resources.length) items = items.filter((item) => resources.includes(item.resourceId));
-  const statuses = normalizeList(args.statuses);
-  if (statuses.length) items = items.filter((item) => statuses.includes(item.status));
-  const capacityAreas = normalizeList(args.capacityAreas);
-  if (capacityAreas.length) items = items.filter((item) => capacityAreas.includes(item.capacityArea));
-  const capacityCategories = normalizeList(args.capacityCategories);
-  if (capacityCategories.length) items = items.filter((item) => capacityCategories.includes(item.capacityCategory));
   if (args.dateFrom) items = items.filter((item) => item.date >= args.dateFrom);
   if (args.dateTo) items = items.filter((item) => item.date <= args.dateTo);
   if (args.q) items = applyMockQuery(items, args.q);
@@ -299,31 +402,10 @@ function getActivities(args = {}) {
     items: paged,
     offset,
     limit,
+    totalResults: items.length,
     hasMore: offset + paged.length < items.length,
     expression: args.q || undefined
   };
-}
-
-function getResources(args = {}) {
-  const offset = clampInteger(args.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-  const limit = clampInteger(args.limit, 100, 1, 100000);
-  const fields = normalizeList(args.fields);
-  let items = state.resources.slice();
-
-  const statuses = normalizeList(args.statuses);
-  if (statuses.length) items = items.filter((item) => statuses.includes(item.status));
-  const resourceTypes = normalizeList(args.resourceTypes);
-  if (resourceTypes.length) items = items.filter((item) => resourceTypes.includes(item.resourceType));
-  const capacityAreas = normalizeList(args.capacityAreas);
-  if (capacityAreas.length) items = items.filter((item) => capacityAreas.includes(item.capacityArea));
-  const capacityCategories = normalizeList(args.capacityCategories);
-  if (capacityCategories.length) items = items.filter((item) => capacityCategories.includes(item.capacityCategory));
-  const skillCodes = normalizeList(args.skillCodes);
-  if (skillCodes.length) items = items.filter((item) => skillCodes.some((skill) => item.workSkills.includes(skill)));
-  if (args.parentResourceId) items = items.filter((item) => item.parentResourceId === args.parentResourceId);
-
-  const paged = items.slice(offset, offset + limit).map((item) => projectFields(item, fields));
-  return { items: paged, offset, limit, totalResults: items.length };
 }
 
 function getResourceLocations(args = {}) {
@@ -339,6 +421,18 @@ function getResourceLocations(args = {}) {
     items: items.map((item) => projectFields(item, fields)),
     totalResults: items.length
   };
+}
+
+function getActivityWorkSkills(args = {}) {
+  if (!args.activityId) throw new ToolError("missing_activity_id", "activityId is required.");
+  const offset = clampInteger(args.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  const limit = clampInteger(args.limit, 100, 1, 100);
+  const payload = state.activityWorkSkillsByActivityId[String(args.activityId)];
+  if (!payload) {
+    throw new ToolError("activity_not_found", `No mock activity exists for activityId ${args.activityId}.`);
+  }
+  const items = payload.items.slice(offset, offset + limit);
+  return { items, offset, limit, totalResults: payload.items.length, hasMore: offset + items.length < payload.items.length };
 }
 
 function applyMockQuery(items, query) {
@@ -364,9 +458,17 @@ function projectFields(item, fields) {
   if (!fields.length) return { ...item };
   const projected = {};
   for (const field of fields) {
-    if (Object.hasOwn(item, field)) projected[field] = item[field];
+    const value = readField(item, field);
+    if (value !== undefined) writeField(projected, field, value);
   }
   return projected;
+}
+
+function writeField(item, path, value) {
+  const parts = path.split(".");
+  let target = item;
+  for (const part of parts.slice(0, -1)) target = target[part] ||= {};
+  target[parts.at(-1)] = value;
 }
 
 function normalizeList(value) {

@@ -1,173 +1,136 @@
 const BASE_DATE = "2026-05-26";
 
-const CLUSTERS = [
-  {
-    area: "FL",
-    city: "Orlando",
-    state: "FL",
-    postalPrefix: "328",
-    baseLatitude: 28.5383,
-    baseLongitude: -81.3792,
-    activityCount: 42,
-    resources: 3,
-    capacityCategories: ["CC_APPLIANCE", "CC_HVAC"]
-  },
-  {
-    area: "FL",
-    city: "Tampa",
-    state: "FL",
-    postalPrefix: "336",
-    baseLatitude: 27.9506,
-    baseLongitude: -82.4572,
-    activityCount: 36,
-    resources: 3,
-    capacityCategories: ["CC_HVAC", "CC_APPLIANCE"]
-  },
-  {
-    area: "FL",
-    city: "Jacksonville",
-    state: "FL",
-    postalPrefix: "322",
-    baseLatitude: 30.3322,
-    baseLongitude: -81.6557,
-    activityCount: 30,
-    resources: 2,
-    capacityCategories: ["CC_PLUMBING", "CC_HVAC"]
-  },
-  {
-    area: "TX",
-    city: "Austin",
-    state: "TX",
-    postalPrefix: "787",
-    baseLatitude: 30.2672,
-    baseLongitude: -97.7431,
-    activityCount: 26,
-    resources: 4,
-    capacityCategories: ["CC_HVAC", "CC_PLUMBING"]
-  },
-  {
-    area: "GA",
-    city: "Atlanta",
-    state: "GA",
-    postalPrefix: "303",
-    baseLatitude: 33.749,
-    baseLongitude: -84.388,
-    activityCount: 24,
-    resources: 4,
-    capacityCategories: ["CC_APPLIANCE", "CC_PLUMBING"]
-  }
+const CAPACITY_AREAS = [
+  { label: "FL", name: "Florida", type: "area", status: "active", parent: { label: "US_FIELD_SERVICE", name: "US Field Service" } },
+  { label: "CA", name: "California", type: "area", status: "active", parent: { label: "US_FIELD_SERVICE", name: "US Field Service" } },
+  { label: "TX", name: "Texas", type: "area", status: "active", parent: { label: "US_FIELD_SERVICE", name: "US Field Service" } },
+  { label: "GA", name: "Georgia", type: "area", status: "active", parent: { label: "US_FIELD_SERVICE", name: "US Field Service" } },
+  { label: "AZ", name: "Arizona", type: "area", status: "active", parent: { label: "US_FIELD_SERVICE", name: "US Field Service" } },
+  { label: "US_FIELD_SERVICE", name: "US Field Service", type: "group", status: "active" }
 ];
 
-const SKILLS_BY_CATEGORY = {
-  CC_APPLIANCE: ["APPLIANCE_REPAIR", "PREVENTIVE_MAINTENANCE", "CUSTOMER_PREMISE_EQUIPMENT"],
-  CC_HVAC: ["HVAC_SERVICE", "ELECTRICAL_DIAGNOSTICS", "WARRANTY_REPAIRS"],
-  CC_PLUMBING: ["PLUMBING", "COMPRESSOR_DIAGNOSTICS", "COMMERCIAL_MAINTENANCE"]
+const RESOURCE_TYPES = [
+  { label: "BK", name: "Bucket", active: true, role: "bucket" },
+  { label: "GR", name: "Group", active: true, role: "organizationUnit" },
+  { label: "TR", name: "Truck", active: true, role: "vehicle" },
+  { label: "TECH", name: "Technician", active: true, role: "fieldResource" },
+  { label: "CONTRACTOR", name: "Contractor", active: true, role: "fieldResource" }
+];
+
+const AREAS = [
+  { label: "FL", cities: [["Orlando", "FL", "328", 28.5383, -81.3792], ["Tampa", "FL", "336", 27.9506, -82.4572]], resources: 8, monthly: [24, 34, 48], skills: ["HVAC", "APPLIANCE", "PLUMBING"] },
+  { label: "CA", cities: [["Los Angeles", "CA", "900", 34.0522, -118.2437], ["San Diego", "CA", "921", 32.7157, -117.1611]], resources: 6, monthly: [20, 26, 34], skills: ["HVAC", "ELECTRICAL", "APPLIANCE"] },
+  { label: "TX", cities: [["Austin", "TX", "787", 30.2672, -97.7431], ["Dallas", "TX", "752", 32.7767, -96.797]], resources: 6, monthly: [18, 24, 32], skills: ["HVAC", "PLUMBING", "ELECTRICAL"] },
+  { label: "GA", cities: [["Atlanta", "GA", "303", 33.749, -84.388], ["Savannah", "GA", "314", 32.0809, -81.0912]], resources: 5, monthly: [16, 18, 22], skills: ["APPLIANCE", "PLUMBING"] },
+  { label: "AZ", cities: [["Phoenix", "AZ", "850", 33.4484, -112.074], ["Tucson", "AZ", "857", 32.2226, -110.9747]], resources: 5, monthly: [14, 18, 20], skills: ["HVAC", "ELECTRICAL"] }
+];
+
+const SKILL_DETAILS = {
+  HVAC: { label: "HVAC", name: "HVAC Service", ratio: 100 },
+  APPLIANCE: { label: "APPLIANCE", name: "Appliance Repair", ratio: 90 },
+  PLUMBING: { label: "PLUMBING", name: "Plumbing", ratio: 95 },
+  ELECTRICAL: { label: "ELECTRICAL", name: "Electrical Diagnostics", ratio: 85 }
 };
 
 export function createSeedData() {
-  const resources = [];
+  const resourcesByArea = {};
   const locationsByResourceId = {};
+  const activityWorkSkillsByActivityId = {};
   const activities = [];
-  let resourceInternalId = 8101000;
+  let activityId = 4225000;
   let locationId = 9100000;
-  let activityId = 7200000;
 
-  for (const cluster of CLUSTERS) {
-    for (let index = 0; index < cluster.resources; index += 1) {
-      const category = cluster.capacityCategories[index % cluster.capacityCategories.length];
-      const resourceId = `${cluster.area.toLowerCase()}_tech_${String(index + 1).padStart(2, "0")}`;
-      const latitude = roundCoord(cluster.baseLatitude + resourceOffset(index));
-      const longitude = roundCoord(cluster.baseLongitude - resourceOffset(index + 1));
-      resources.push({
+  for (const area of AREAS) {
+    const list = [];
+    list.push({ resourceId: `${area.label}_BUCKET`, resourceType: "BK", status: "active", name: `${area.label} Bucket` });
+    for (let i = 0; i < area.resources; i += 1) {
+      const city = area.cities[i % area.cities.length];
+      const resourceType = i % 5 === 4 ? "CONTRACTOR" : "TECH";
+      const resourceId = `${area.label}_TECH_${String(i + 1).padStart(2, "0")}`;
+      const skillA = area.skills[i % area.skills.length];
+      const skillB = area.skills[(i + 1) % area.skills.length];
+      const resource = {
         resourceId,
-        resourceInternalId: resourceInternalId++,
-        name: `${cluster.city} Tech ${index + 1}`,
-        parentResourceId: `${cluster.area.toLowerCase()}_bucket`,
-        resourceType: "field_resource",
+        resourceType,
+        status: i % 11 === 10 ? "inactive" : "active",
+        name: `${city[0]} Tech ${i + 1}`,
+        workSkills: { items: [skillItem(skillA), skillItem(skillB, 70)] },
+        workSchedules: { items: scheduleItems(area.label, i) }
+      };
+      list.push(resource);
+      locationsByResourceId[resourceId] = [{
+        locationId: locationId++,
+        label: `${resourceId}_HOME`,
         status: "active",
-        organization: "OFSC_FORECASTING_DEMO",
-        timeZone: timezoneFor(cluster.area),
-        timeZoneIANA: timezoneIanaFor(cluster.area),
-        timeZoneDiff: timezoneDiffFor(cluster.area),
-        language: "en",
-        email: `${resourceId}@example.com`,
-        capacityArea: cluster.area,
-        capacityAreaName: areaName(cluster.area),
-        capacityCategory: category,
-        capacityCategoryName: categoryName(category),
-        workSkills: SKILLS_BY_CATEGORY[category].slice(0, 2),
-        weeklyShiftHours: 40
-      });
-      locationsByResourceId[resourceId] = [
-        {
-          locationId: locationId++,
-          label: `${resourceId}_home`,
-          status: "active",
-          address: `${100 + index} ${cluster.city} Service Rd`,
-          city: cluster.city,
-          state: cluster.state,
-          postalCode: `${cluster.postalPrefix}${String(index).padStart(2, "0")}`,
-          country: "US",
-          latitude,
-          longitude,
-          privateLocationFlag: true,
-          locationType: "home"
-        }
-      ];
+        locationType: "home",
+        address: `${100 + i} ${city[0]} Service Rd`,
+        city: city[0],
+        state: city[1],
+        postalCode: `${city[2]}${String(i).padStart(2, "0")}`,
+        country: "US",
+        latitude: round(city[3] + ((i % 5) - 2) * 0.025),
+        longitude: round(city[4] - ((i % 4) - 1) * 0.025),
+        startDate: addDays(BASE_DATE, -365),
+        endDate: addDays(BASE_DATE, 365)
+      }];
     }
-
-    for (let index = 0; index < cluster.activityCount; index += 1) {
-      const category = cluster.capacityCategories[index % cluster.capacityCategories.length];
-      const assignedResource = resources.find((resource) => (
-        resource.capacityArea === cluster.area && resource.capacityCategory === category
-      ));
-      const dayOffset = index % 28;
-      const date = addDays(BASE_DATE, -dayOffset);
-      const status = index % 17 === 0 ? "pending" : "completed";
-      activities.push({
-        activityId: activityId++,
-        apptNumber: `${cluster.area}-${activityId}`,
-        resourceId: assignedResource?.resourceId,
-        date,
-        status,
-        recordType: "regular",
-        activityType: activityTypeFor(category, index),
-        duration: durationFor(category, index),
-        travelTime: 18 + ((index * 7) % 42),
-        latitude: roundCoord(cluster.baseLatitude + activityOffset(index)),
-        longitude: roundCoord(cluster.baseLongitude - activityOffset(index + 2)),
-        city: cluster.city,
-        stateProvince: cluster.state,
-        postalCode: `${cluster.postalPrefix}${String(20 + (index % 70)).padStart(2, "0")}`,
-        country_code: "US",
-        workZone: `${cluster.area}-${cluster.city.toUpperCase().slice(0, 3)}`,
-        capacityArea: cluster.area,
-        capacityAreaName: areaName(cluster.area),
-        capacityCategory: category,
-        capacityCategoryName: categoryName(category),
-        requiredWorkSkills: SKILLS_BY_CATEGORY[category].slice(0, 2),
-        timeOfBooking: `${addDays(date, -bookingLeadDays(cluster.area, dayOffset, index))} 09:00:00`,
-        startTime: `${date} ${String(8 + (index % 8)).padStart(2, "0")}:00:00`,
-        endTime: `${date} ${String(10 + (index % 8)).padStart(2, "0")}:00:00`,
-        slaWindowStart: `${date} 08:00:00`,
-        slaWindowEnd: `${addDays(date, 3 + (index % 5))} 18:00:00`,
-        timeZone: timezoneFor(cluster.area),
-        timeZoneIANA: timezoneIanaFor(cluster.area)
-      });
-    }
+    resourcesByArea[area.label] = list;
+    createActivitiesForArea(area, list.filter((r) => ["TECH", "CONTRACTOR"].includes(r.resourceType)), activities, activityWorkSkillsByActivityId, () => activityId++);
   }
 
-  return { activities, resources, locationsByResourceId };
+  return {
+    capacityAreas: CAPACITY_AREAS,
+    resourceTypes: RESOURCE_TYPES,
+    resourcesByArea,
+    locationsByResourceId,
+    activities,
+    activityWorkSkillsByActivityId
+  };
 }
 
-function activityOffset(index) {
-  const ring = (index % 9) - 4;
-  const spread = (Math.floor(index / 9) % 5) * 0.006;
-  return ring * 0.008 + spread;
+function createActivitiesForArea(area, resources, activities, workSkillsByActivityId, nextActivityId) {
+  for (let month = 0; month < 3; month += 1) {
+    const count = area.monthly[month];
+    const monthStart = addDays(BASE_DATE, -89 + month * 30);
+    for (let i = 0; i < count; i += 1) {
+      const resource = resources[i % resources.length];
+      const city = area.cities[i % area.cities.length];
+      const skill = area.skills[(i + month) % area.skills.length];
+      const date = addDays(monthStart, i % 30);
+      const id = String(nextActivityId());
+      const lead = month === 2 ? 5 + (i % 4) : month === 1 ? 3 + (i % 3) : 2 + (i % 2);
+      activities.push({
+        activityId: id,
+        resourceId: resource.resourceId,
+        timeSlot: ["08-12", "12-17", "17-20"][i % 3],
+        status: "complete",
+        latitude: round(city[3] + ((i % 9) - 4) * 0.007),
+        longitude: round(city[4] - ((i % 9) - 4) * 0.007),
+        timeOfBooking: `${addDays(date, -lead)} 09:00:00`,
+        timeOfAssignment: `${addDays(date, -Math.max(1, lead - 1))} 10:30:00`,
+        duration: 75 + (i % 5) * 20,
+        date,
+        slaWindowStart: `${date} 08:00:00`,
+        slaWindowEnd: `${addDays(date, 2 + (i % 4))} 18:00:00`
+      });
+      workSkillsByActivityId[id] = { items: [skillItem(skill), skillItem(area.skills[(i + 1) % area.skills.length], 50)], totalResults: 2 };
+    }
+  }
 }
 
-function resourceOffset(index) {
-  return ((index % 5) - 2) * 0.028;
+function skillItem(label, ratio) {
+  const base = SKILL_DETAILS[label] || { label, name: label, ratio: 100 };
+  return { label: base.label, name: base.name, ratio: ratio ?? base.ratio };
+}
+
+function scheduleItems(areaLabel, index) {
+  return [0, 1, 2, 3, 4].map((day) => ({
+    recordType: "regular",
+    weekday: day + 1,
+    startTime: "08:00:00",
+    endTime: "17:00:00",
+    scheduleLabel: `${areaLabel}_WEEKDAY_${index + 1}`
+  }));
 }
 
 function addDays(dateText, days) {
@@ -176,54 +139,6 @@ function addDays(dateText, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function roundCoord(value) {
+function round(value) {
   return Number(value.toFixed(6));
-}
-
-function activityTypeFor(category, index) {
-  const values = {
-    CC_APPLIANCE: ["APPLIANCE_INSTALL", "APPLIANCE_REPAIR"],
-    CC_HVAC: ["HVAC_INSTALL", "HVAC_SERVICE"],
-    CC_PLUMBING: ["PLUMBING_REPAIR", "PLUMBING_MAINTENANCE"]
-  };
-  const options = values[category] || ["FIELD_SERVICE"];
-  return options[index % options.length];
-}
-
-function durationFor(category, index) {
-  const base = { CC_APPLIANCE: 95, CC_HVAC: 125, CC_PLUMBING: 110 }[category] || 90;
-  return base + ((index % 4) * 15);
-}
-
-function bookingLeadDays(area, dayOffset, index) {
-  const recent = dayOffset <= 13;
-  const wave = index % 3;
-  if (area === "FL") return recent ? 6 + wave : 2 + wave;
-  if (area === "TX") return recent ? 5 + (wave % 2) : 3 + (wave % 2);
-  if (area === "GA") return recent ? 4 + (wave % 2) : 3;
-  return recent ? 4 : 3;
-}
-
-function areaName(area) {
-  return { FL: "Florida", TX: "Texas", GA: "Georgia" }[area] || area;
-}
-
-function categoryName(category) {
-  return {
-    CC_APPLIANCE: "Appliance",
-    CC_HVAC: "HVAC",
-    CC_PLUMBING: "Plumbing"
-  }[category] || category;
-}
-
-function timezoneFor(area) {
-  return area === "TX" ? "Central" : "Eastern";
-}
-
-function timezoneIanaFor(area) {
-  return area === "TX" ? "America/Chicago" : "America/New_York";
-}
-
-function timezoneDiffFor(area) {
-  return area === "TX" ? -360 : -300;
 }

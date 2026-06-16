@@ -2,15 +2,18 @@
 
 Mock MCP server for the Forecasting 2.0 proof of concept where workflows calculate landing-page capacity issues and hire recommendations from granular entity data.
 
-This package is separate from `mock-forecasting-mcp`. The older mock returns computed workforce metrics and recommendations. This mock exposes only three raw data tools modeled after Oracle Field Service public REST APIs:
+This package is separate from `mock-forecasting-mcp`. The older mock returns computed workforce metrics and recommendations. This mock exposes raw production-like data tools modeled after Oracle Field Service public REST APIs:
 
 ```text
+get_capacity_areas
+get_resource_types
+get_resource_descendants
 get_activities
-get_resources
 get_resource_locations
+get_activity_work_skills
 ```
 
-The mock data includes activities, resources, capacity categories, skills, and home locations needed for workflow-side grid, proximity, activity/proximity ratio, and hire-location calculations. It intentionally does not return precomputed issue ranks, hire options, proximity grids, simulations, recommendation text, or impact summaries.
+The mock data includes five capacity areas, resource types, field-resource descendants with expanded work skills and work schedules, resource locations, 90 days of completed activities, and per-activity work skills. It intentionally does not return precomputed issue ranks, hire options, capacity buckets on activities, top-level skills on generic resource responses, proximity grids, simulations, recommendation text, or impact summaries.
 
 ## Run Locally
 
@@ -58,9 +61,12 @@ POST /mock/reset
 These are available for local inspection and mirror the public REST paths used as the contract reference:
 
 ```text
+GET /rest/ofscMetadata/v1/capacityAreas
+GET /rest/ofscMetadata/v1/resourceTypes
 GET /rest/ofscCore/v1/activities
-GET /rest/ofscCore/v1/resources
+GET /rest/ofscCore/v1/resources/{resourceId}/descendants
 GET /rest/ofscCore/v1/resources/{resourceId}/locations
+GET /rest/ofscCore/v1/activities/{activityId}/workSkills
 ```
 
 They share the same mock handlers as the MCP tools.
